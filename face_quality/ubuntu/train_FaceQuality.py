@@ -1,0 +1,153 @@
+import torch
+import os
+import torch.utils.data as data
+from load_data import FaceQuality_DataLoader, quality_collate, FaceQuality_augment, quality_augment_collate
+from slim_net import FaceQualityNet, FaceQualitySlim
+from myconfig import config
+from loss import FaceQualityLoss, FaceQuality_PatchLoss
+#cuda
+torch.cuda.set_device(1)
+
+def adjust_learning_rate(epoch, optimizer):
+    lr = config.lr
+    if epoch > 650:
+        lr = lr / 1000000
+    elif epoch > 600:
+        lr = lr / 100000
+    elif epoch > 550:
+        lr = lr / 10000
+    elif epoch > 510:
+        lr = lr / 1000
+    elif epoch > 350:
+        lr = lr / 100
+    elif epoch > 100:
+        lr = lr / 10
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
+
+def train():
+    # 读取训练测试数据
+    data_train = FaceQuality_DataLoader(config.train_data, config.train_txt, config.crop_size, config.crop_num)
+    train_loader = data.DataLoader(data_train, batch_size=config.batch_size, shuffle=True, num_workers=0, collate_fn=quality_collate)
+    train_len = len(data_train)
+    max_batch = train_len // config.batch_size
+
+    # 定义网络结构
+    # Net = FaceQualityNet(channels=config.net_channels, lda_outc=config.lad_channel)
+    Net = FaceQualitySlim(channels=config.slim_channels)
+    net_dict = torch.load(config.resetNet, map_location=lambda storage, loc: storage)
+    Net.load_state_dict(net_dict)
+    Net.cuda()
+
+    criterion = FaceQualityLoss()
+    optimizer = torch.optim.SGD(Net.parameters(), lr=config.lr, weight_decay=config.weight_decay, momentum=0.9)
+    Net.train()
+    for epoch in range(config.epochs):
+        print("Epoch {}".format(epoch))
+        print('I am training, please wait...')
+        batch = 0
+        lr_cur = config.lr
+        for i, (images, label) in enumerate(train_loader):
+            batch += 1
+            # 若GPU可用，将图像和标签移往GPU
+            images = images.cuda()
+            label = label.unsqueeze(1)
+            label = label.cuda()
+            # 预测
+            out = Net(images)
+            # 清除所有累积梯度
+            optimizer.zero_grad()
+
+            loss = criterion(out, label)
+
+            loss.backward()
+            optimizer.step()
+
+            for params in optimizer.param_groups:
+                lr_cur = params['lr']
+
+            if batch % 5 == 0:
+                print("Epoch:{}/{} || Epochiter: {}/{} || loss: {:.4f} || LR: {:.8f}".format(epoch, config.epochs, max_batch, batch, loss.item(), lr_cur))
+
+        # 调用学习率调整函数
+        adjust_learning_rate(epoch, optimizer)
+
+        if (epoch % 2 == 0 and epoch > 0):
+            torch.save(Net.state_dict(), config.model_save + "/" + "FaceQualitySlim_{}.pth".format(epoch))
+
+        # 打印度量
+        print("Epoch {}, TrainLoss: {}".format(epoch, loss.item()))
+    torch.save(Net.state_dict(), config.model_save + "/" + "FaceQualitySlim_final.pth")
+
+def train2():
+    # 读取训练测试数据
+    data_train = FaceQuality_augment(config.train_data, config.train_txt, config.crop_size, config.crop_num_scale)
+    train_loader = data.DataLoader(data_train, batch_size=config.batch_size, shuffle=True, num_workers=0, collate_fn=quality_augment_collate)
+    train_len = len(data_train)
+    max_batch = train_len // config.batch_size
+
+    # 定义网络结构
+    Net = FaceQualityNet(channels=config.net_channels, lda_outc=config.lad_channel)
+    # Net = FaceQualitySlim(channels=config.slim_channels)
+    # net_dict = torch.load(config.resetNet, map_location=lambda storage, loc: storage)
+    # Net.load_state_dict(net_dict)
+    Net.cuda()
+
+    criterion = FaceQuality_PatchLoss(train_batch=config.batch_size)
+    optimizer = torch.optim.SGD(Net.parameters(), lr=config.lr, weight_decay=config.weight_decay, momentum=0.9)
+    Net.train()
+    for epoch in range(config.epochs):
+        print("Epoch {}".format(epoch))
+        print('I am training, please wait...')
+        batch = 0
+        lr_cur = config.lr
+        for i, (images, label) in enumerate(train_loader):
+            batch += 1
+            # 若GPU可用，将图像和标签移往GPU
+            images = images.cuda()
+            label = label.cuda()
+            # 预测
+            out = Net(images)
+            # 清除所有累积梯度
+            optimizer.zero_grad()
+
+            loss = criterion(out, label)
+
+            loss.backward()
+            optimizer.step()
+
+            for params in optimizer.param_groups:
+                lr_cur = params['lr']
+
+            if batch % 5 == 0:
+                print("Epoch:{}/{} || Epochiter: {}/{} || loss: {:.4f} || LR: {:.8f}".format(epoch, config.epochs, max_batch, batch, loss.item(), lr_cur))
+
+        # 调用学习率调整函数
+        adjust_learning_rate(epoch, optimizer)
+
+        if (epoch % 2 == 0 and epoch > 0):
+            torch.save(Net.state_dict(), config.model_save + "/" + "FaceQuality_{}.pth".format(epoch))
+
+        # 打印度量
+        print("Epoch {}, TrainLoss: {}".format(epoch, loss.item()))
+    torch.save(Net.state_dict(), config.model_save + "/" + "FaceQuality_final.pth")
+
+if __name__ == "__main__":
+    train2()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

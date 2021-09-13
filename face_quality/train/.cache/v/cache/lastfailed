@@ -1,0 +1,4 @@
+{
+  "test.py::test_dir": true,
+  "test.py::test_one": true
+}
